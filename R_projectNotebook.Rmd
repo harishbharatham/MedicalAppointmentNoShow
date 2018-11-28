@@ -1,0 +1,165 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_document: default
+---
+##Data import
+First we will import the data from the file location
+```{r}
+MedApp <- read.csv("/Users/harishbharatham/R-Language/Summer2018/BigDataAnalytics/MedAppointmentNoShow/Data/MedAppointmentNoShow.csv")
+attach(MedApp)
+dim(MedApp)
+nrow(MedApp)
+summary(MedApp)
+
+```
+##Data cleaning
+```{r}
+# To delete the patientID column 
+MedApp$PatientId<- NULL
+#changing Gender column into dummy variable female = 1 , male =0
+MedApp$Gender<-ifelse(MedApp$Gender=="F",1,0)
+#changing No.show column into dummies with yes=1 no=0
+MedApp$No.show<-ifelse(MedApp$No.show=="Yes",1,0)
+# To seperate date from time
+MedApp$Scheduledtime <- substr(ScheduledDay, 11, 20)
+MedApp$ScheduledDay <- substr(ScheduledDay, 0, 10)
+MedApp$Appointment_Time <- substr(AppointmentDay, 11, 20)
+MedApp$Appointment_Date <- substr(AppointmentDay, 0, 10)
+View(MedApp)
+
+#To mention categorical columns as characters 
+cols_to_change = c(2, 7:11,13)
+for(i in cols_to_change){
+     class(MedApp[,i]) = "character"
+}
+#To mention categorical columns as characters 
+View(MedApp)
+```
+
+
+####Creating 'DaysWaited' feature
+We need to quantify the Appointment date and Scheduled date. So we create a variable that will substract both dates and provides us a waiting time in days which we can use in the model for prediction.
+```{r}
+MedApp.scheduled <- as.Date(MedApp$ScheduledDay)
+MedApp.Appmtmnt <- as.Date(MedApp$AppointmentDay)
+DayWaited <- as.integer(c(MedApp.Appmtmnt - MedApp.scheduled))
+MedApp$DayWaited <- DayWaited
+
+columnName <- c("Gender","DayWaited","Age","Scholarship","Hipertension",
+                "Diabetes","Alcoholism","Handcap","SMS_received","No.show")
+MedApp <- MedApp[columnName]
+
+cols_to_change = c(1:10)
+for(i in cols_to_change){
+     class(MedApp[,i]) = "integer"
+}
+View(MedApp)
+
+str(MedApp)
+
+```
+
+##Data Split
+We need to create test and train data for the model. We create a sample size and we keep the seed 123 as random, but to get the same results we keep the 123 constant.
+```{r}
+sampleSize <- floor(0.7 * nrow(MedApp))
+set.seed(123)
+index <- sample(seq_len(nrow(MedApp)), size = sampleSize)
+
+train <- MedApp[index, ]
+test <- MedApp[-index, ]
+```
+
+##Logistic Regression
+We have the test and train split, we will create the logistic regression model and run it on the train split of the data.
+```{r}
+b <- step(glm(No.show~1,data=train,family='binomial'),
+          scope=list(lower=~1,upper=~Gender+DayWaited+Age+Scholarship+Hipertension
+                     +Diabetes+Alcoholism+Handcap+SMS_received),
+          direction='both')
+
+summary(b)
+```
+
+Now we will run the model with the test data to generate the prediction
+```{r}
+b.prediction <- predict(b,newdata=test,type='response')
+b.prediction[b.prediction >= 0.4] <- 1
+b.prediction[b.prediction < 0.4] <- 0
+b.prediction <- as.vector(b.prediction)
+```
+
+Now let's create a confusion matrix to easily understand the model performance. For that, we need to import a library, caret.
+```{r}
+library(caret)
+library(e1071)
+b_conf <- confusionMatrix(b.prediction,test$No.show)
+b_conf
+```
+##Neural Networks
+Now let's create and run the Artificial Neural Networks model and run it on train and test data.
+```{r}
+library(nnet)
+set.seed(1234)
+nn.p <-nnet(No.show~., data= train, size = 4, rang= .1,decay=.0005,maxit=200)
+nn.prediction<-predict(nn.p,test)
+nn.prediction[nn.prediction<0.4] <-0
+nn.prediction[nn.prediction>=0.4] <-1
+```
+
+Let's create a confusion matrix to evaluate the performance of the model.
+```{r}
+nn_conf <- confusionMatrix(nn.prediction,test$No.show)
+nn_conf
+
+```
+
+##Results
+As we can see, the ANN performed better than logistic, but both the results are close.
+```{r}
+
+
+
+accuracy <- nn_conf$overall['Accuracy']
+precision <- nn_conf$byClass['Pos Pred Value']
+recall <- nn_conf$byClass['Sensitivity']
+F1 <- 2*((precision*recall)/(precision+recall))
+r <- data.frame(rbind(accuracy,precision,recall,F1))
+
+
+accuracy <- b_conf$overall['Accuracy']
+precision <- b_conf$byClass['Pos Pred Value']
+recall <- b_conf$byClass['Sensitivity']
+F1 <- 2*((precision*recall)/(precision+recall))
+r<- cbind(r,rbind(accuracy,precision,recall,F1))
+names(r) <- c("ANN Model","Logistic Model")
+
+r
+```
+
+##Sample data
+Created Sample dataframes to test the model
+```{r}
+x <- data.frame("Gender" = 0,"DayWaited"= 10,"Age" = 25,"Scholarship" = 0,"Hipertension" = 0,
+                "Diabetes" = 0,"Alcoholism"= 1,"Handcap" = 0,"SMS_received" = 1)
+
+nn.prediction<-predict(nn.p,x)
+nn.prediction
+nn.prediction[nn.prediction<0.4] <-"Show"
+nn.prediction[nn.prediction>=0.4 && nn.prediction!="Show"] <-"NoShow"
+nn.prediction
+```
+
+```{r}
+y <- data.frame("Gender" = 1,"DayWaited"= 20,"Age" = 22,"Scholarship" = 0,"Hipertension" = 0,
+                "Diabetes" = 0,"Alcoholism"= 1,"Handcap" = 0,"SMS_received" = 0)
+nn.prediction<-predict(nn.p,y)
+nn.prediction
+nn.prediction[nn.prediction<0.4] <-"Show"
+nn.prediction[nn.prediction>=0.4 && nn.prediction!="Show"] <-"NoShow"
+nn.prediction
+
+```
+
